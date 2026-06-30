@@ -199,9 +199,31 @@ input[type=time].txti{font-size:20px;font-weight:500;margin-bottom:0;}
 .bn.on .bnico{background:var(--gof);}
 .bnlbl{font-size:10px;color:var(--t4);letter-spacing:.03em;}
 .bn.on .bnlbl{color:var(--go);font-weight:500;}
+
+/* PASSWORD LOCK */
+.lockscreen{position:fixed;inset:0;background:#F5F1EB;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 32px;}
+.lock-logo{font-family:'DM Serif Display',serif;font-style:italic;font-size:36px;color:#8B6F3E;margin-bottom:8px;}
+.lock-sub{font-size:13px;color:#A89E92;margin-bottom:48px;letter-spacing:0.05em;}
+.lock-input{width:100%;max-width:280px;font-family:inherit;font-size:20px;font-weight:500;letter-spacing:0.2em;text-align:center;color:#2B2720;background:#EDE8DF;border:none;border-radius:12px;padding:14px 20px;outline:none;margin-bottom:12px;}
+.lock-input::placeholder{font-size:14px;letter-spacing:0.05em;color:#C8C0B4;font-weight:400;}
+.lock-input.err{background:#F5E4E4;animation:shake .3s ease;}
+.lock-btn{width:100%;max-width:280px;padding:15px;background:#8B6F3E;color:#fff;font-family:inherit;font-size:15px;font-weight:600;border:none;border-radius:12px;cursor:pointer;transition:opacity .2s;}
+.lock-btn:active{opacity:.85;}
+.lock-hint{font-size:11px;color:#C8C0B4;margin-top:16px;}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
 </style>
 </head>
 <body>
+
+
+<div class="lockscreen" id="lockscreen">
+  <div class="lock-logo">Evy</div>
+  <div class="lock-sub">每日记录</div>
+  <input class="lock-input" id="lockInput" type="password" placeholder="输入密码" maxlength="20"
+    onkeydown="if(event.key==='Enter')checkPwd()">
+  <button class="lock-btn" onclick="checkPwd()">进入</button>
+  <div class="lock-hint">· 仅限本人使用 ·</div>
+</div>
 
 <div class="topbar">
   <div class="logo">Evy</div>
@@ -943,6 +965,33 @@ function showToast(msg) {
   t.classList.add('on');
   setTimeout(function() { t.classList.remove('on'); }, 2200);
 }
+
+// ── PASSWORD ──
+(function(){
+  var PWD = '2378';
+  var KEY = 'evyauth';
+  if(localStorage.getItem(KEY) === 'ok'){
+    document.getElementById('lockscreen').style.display='none';
+    return;
+  }
+  window.checkPwd = function(){
+    var v = document.getElementById('lockInput').value;
+    if(v === PWD){
+      localStorage.setItem(KEY,'ok');
+      var ls = document.getElementById('lockscreen');
+      ls.style.transition='opacity .3s';
+      ls.style.opacity='0';
+      setTimeout(function(){ls.style.display='none';},300);
+    } else {
+      var inp = document.getElementById('lockInput');
+      inp.classList.add('err');
+      inp.value='';
+      inp.placeholder='密码错误，再试一次';
+      setTimeout(function(){inp.classList.remove('err');inp.placeholder='输入密码';},1000);
+    }
+  };
+})();
+
 </script>
 </body>
 </html>
