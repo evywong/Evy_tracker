@@ -322,7 +322,7 @@ input[type=time].txti{font-size:20px;font-weight:500;margin-bottom:0;}
 
 <!-- HISTORY -->
 <div id="v-history" class="view">
-  <div style="padding-top:16px;padding-bottom:4px;font-size:11px;color:var(--t3);letter-spacing:0.05em">数据截至 <span id="histCutoff">—</span></div>
+  <div style="padding-top:16px;padding-bottom:4px;font-size:11px;color:var(--t3);letter-spacing:0.05em">数据截至 <span id="histCutoff">—</span> · <span id="syncStatus">同步中…</span></div>
   <div class="sumstrip">
     <div class="sumpill"><div class="sumn" id="hEx">—</div><div class="suml">运动天</div></div>
     <div class="sumpill"><div class="sumn" id="hBn">—</div><div class="suml">便当</div></div>
@@ -376,6 +376,94 @@ const DDOPTS = {
 
 const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WD=['周日','周一','周二','周三','周四','周五','周六'];
+
+// ═══════════════════════════════════════════
+// AIRTABLE SYNC
+// ═══════════════════════════════════════════
+const AT_BASE = 'appOsS1wijjLel4tX';
+const AT_TOKEN = 'pat94H4IBB8p5jTnQ.5beb63f41240def78c45f9e19dc0693194f691cf91339bac2eee550719789c8b';
+const AT_URL = 'https://api.airtable.com/v0/' + AT_BASE + '/' + encodeURIComponent('日记录');
+let atRecords = null;
+let atLoading = false;
+
+function logToAT(log) {
+  var f = {'日期': log.date};
+  if (log.exercise) {
+    f['是否运动'] = true;
+    if (log.exercise.type) f['运动类型'] = log.exercise.type;
+    if (log.exercise.form) f['上课形式'] = log.exercise.form;
+    if (log.exercise.inst) f['机构'] = log.exercise.inst;
+    if (log.exercise.coach) f['教练'] = log.exercise.coach;
+    if (log.exercise.topic) f['课程主题'] = log.exercise.topic;
+    if (log.exercise.order) f['订单类型'] = log.exercise.order;
+    if (log.exercise.dur) f['运动时长min'] = log.exercise.dur;
+    if (log.exercise.km) f['跑步公里'] = log.exercise.km;
+    if (log.exercise.note) f['备注'] = log.exercise.note;
+  } else { f['是否运动'] = false; }
+  if (log.bento) f['便当个数'] = log.bento.num || log.bento;
+  return f;
+}
+
+function atToLog(rec) {
+  var f = rec.fields, date = f['日期'];
+  if (!date) return null;
+  var e = null;
+  if (f['是否运动']) {
+    e = {type:f['运动类型']||'',form:f['上课形式']||'',inst:f['机构']||'',
+         coach:f['教练']||'',topic:f['课程主题']||'',order:f['订单类型']||'',
+         dur:f['运动时长min']||0,km:f['跑步公里']||'',note:f['备注']||''};
+  }
+  return {date:date, exercise:e, bento:f['便当个数']?{num:f['便当个数'],note:''}:null, sleep:null, atId:rec.id, src:'cloud'};
+}
+
+async function atFetchAll() {
+  var all=[], offset=null;
+  try {
+    do {
+      var url = AT_URL+'?pageSize=100'+(offset?'&offset='+offset:'');
+      var res = await fetch(url,{headers:{'Authorization':'Bearer '+AT_TOKEN}});
+      if (!res.ok) throw new Error('AT '+res.status);
+      var data = await res.json();
+      all = all.concat(data.records||[]);
+      offset = data.offset||null;
+    } while(offset);
+    atRecords = {};
+    all.forEach(function(r){if(r.fields['日期']) atRecords[r.fields['日期']]=r;});
+    return true;
+  } catch(e) { console.warn('AT fetch:',e); return false; }
+}
+
+async function atSave(log) {
+  var fields = logToAT(log);
+  try {
+    var ex = atRecords && atRecords[log.date];
+    var res = ex
+      ? await fetch(AT_URL+'/'+ex.id,{method:'PATCH',headers:{'Authorization':'Bearer '+AT_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({fields:fields})})
+      : await fetch(AT_URL,{method:'POST',headers:{'Authorization':'Bearer '+AT_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({fields:fields})});
+    if (!res.ok) throw new Error('AT save '+res.status);
+    var rec = await res.json();
+    if (!atRecords) atRecords={};
+    atRecords[log.date]=rec;
+    return true;
+  } catch(e) { console.warn('AT save:',e); return false; }
+}
+
+async function atInit() {
+  atLoading=true;
+  var ok = await atFetchAll();
+  atLoading=false;
+  if (ok) {
+    for (var i=0;i<localStorage.length;i++) {
+      var k=localStorage.key(i);
+      if (k&&k.startsWith('evylog_')) {
+        try { var log=JSON.parse(localStorage.getItem(k)); if(!atRecords[log.date]) await atSave(log); } catch(e){}
+      }
+    }
+  }
+  if (currentView==='history') renderHistory();
+  if (currentView==='stats') renderStats();
+}
+
 const PRE2021_BENTO=1443; // 2016前~2020年累计
 const DATA_DATE='2026/7/1';
 // ── AUTHORITATIVE BENTO DATA from 汇总呈现 ──
@@ -402,7 +490,7 @@ window.addEventListener('DOMContentLoaded', function() {
   initDate();
   initDDs();
   renderTpls();
-  loadHistData();
+  loadHistData(); // atInit() called inside loadHistData callback
   // close dropdowns on outside tap
   document.addEventListener('click', function(e) {
     if (!e.target.closest('.dd')) closeAllDDs();
@@ -461,6 +549,7 @@ function loadHistData() {
           });
           if (currentView === 'history') renderHistory();
           if (currentView === 'stats') renderStats();
+          atInit();
         } else {
           chunks.push(res.value);
           pump();
@@ -645,6 +734,7 @@ function saveLog() {
   var data = Object.assign({ date: dateStr }, getFormData());
   localStorage.setItem('evylog_' + dateStr, JSON.stringify(data));
   showToast('已保存 ✦');
+  atSave(data).then(function(ok){ if(ok) showToast('已保存并同步 ✦'); });
 }
 
 // ═══════════════════════════════════════════
@@ -712,6 +802,8 @@ function renderHistory() {
   var latestDate = logs.length ? logs[0].date : new Date().toISOString().slice(0,10);
   var ld = new Date(latestDate + 'T12:00:00');
   document.getElementById('histCutoff').textContent = ld.getFullYear()+'/'+(ld.getMonth()+1)+'/'+ld.getDate();
+  var ss = document.getElementById('syncStatus');
+  if (ss) { ss.textContent = atRecords ? '已同步 ✦' : (atLoading ? '同步中…' : '本地'); if (atRecords) ss.style.color='var(--gn)'; }
   var exD = 0, bn = 0, hrs = 0;
   logs.forEach(function(l) {
     if (l.exercise) { exD++; hrs += l.exercise.dur || 0; }
